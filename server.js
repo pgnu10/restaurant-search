@@ -2,60 +2,71 @@ import "dotenv/config";
 import express from "express";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
-import {
-  searchPlaces,
-  fetchAllMenus,
-  searchSubwayStations,
-  computeOutlierBounds,
-} from "./search.js";
+import { handleSearch } from "./search.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
 
 app.use(express.static(join(__dirname, "public")));
 
+function parseBounds(query) {
+  const { swLat, swLng, neLat, neLng } = query;
+  if (!swLat || !swLng || !neLat || !neLng) return null;
+  return {
+    swLat: parseFloat(swLat),
+    swLng: parseFloat(swLng),
+    neLat: parseFloat(neLat),
+    neLng: parseFloat(neLng),
+  };
+}
+
 app.get("/api/search", async (req, res) => {
   const { location, keyword } = req.query;
-  if (!location || !keyword) {
-    return res.status(400).json({ error: "location과 keyword가 필요합니다." });
+  const bounds = parseBounds(req.query);
+  if ((!location && !bounds) || !keyword) {
+    return res
+      .status(400)
+      .json({ error: "location 또는 bounds와 keyword가 필요합니다." });
   }
 
   try {
-    const places = await searchPlaces(location, keyword);
-    if (places.length === 0) {
-      return res.json({
-        location,
-        keyword,
-        places: [],
-        stations: [],
-        iqr: { lower: 0, upper: Infinity },
-      });
-    }
-
-    const [results, stations] = await Promise.all([
-      fetchAllMenus(places),
-      searchSubwayStations(location),
-    ]);
-
-    const iqr = computeOutlierBounds(results, keyword);
-
-    const filtered = [];
-    for (const r of results) {
-      const matched = r.menus.filter((m) => m.name.includes(keyword));
-      if (matched.length === 0) continue;
-      matched.sort((a, b) => {
-        if (!a.price && !b.price) return 0;
-        if (!a.price) return 1;
-        if (!b.price) return -1;
-        return a.price - b.price;
-      });
-      filtered.push({ ...r, matchedMenus: matched });
-    }
-
-    res.json({ location, keyword, places: filtered, stations, iqr });
+    const result = await handleSearch(location || "", keyword, { bounds });
+    res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+app.get("/api/search/stream", async (req, res) => {
+  const { location, keyword } = req.query;
+  const bounds = parseBounds(req.query);
+  if ((!location && !bounds) || !keyword) {
+    res.status(400).json({ error: "location 또는 bounds와 keyword가 필요합니다." });
+    return;
+  }
+
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache",
+    Connection: "keep-alive",
+  });
+
+  const send = (event, data) => {
+    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  };
+
+  try {
+    const result = await handleSearch(location || "", keyword, {
+      bounds,
+      onProgress: (phase, current, total) => {
+        send("progress", { phase, current, total });
+      },
+    });
+    send("done", result);
+  } catch (err) {
+    send("error", { message: err.message });
+  }
+  res.end();
 });
 
 const PORT = process.env.PORT || 3000;

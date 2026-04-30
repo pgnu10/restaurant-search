@@ -46,7 +46,7 @@ body { font-family: -apple-system, 'Malgun Gothic', sans-serif; height: 100vh; b
 /* === Loading View === */
 #loading-view {
   display: none; flex-direction: column; align-items: center; justify-content: center;
-  height: 100vh; gap: 20px;
+  height: 100vh; gap: 16px;
 }
 .spinner {
   width: 48px; height: 48px; border: 4px solid #e0e0e0; border-top-color: #2c3e50;
@@ -54,10 +54,31 @@ body { font-family: -apple-system, 'Malgun Gothic', sans-serif; height: 100vh; b
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 .loading-text { font-size: 16px; color: #555; }
-.loading-sub { font-size: 13px; color: #999; }
+.progress-bar-wrap {
+  width: 260px; height: 4px; background: #e0e0e0; border-radius: 2px; overflow: hidden;
+}
+.progress-bar-fill {
+  height: 100%; width: 0; background: #2c3e50; border-radius: 2px;
+  transition: width .3s ease;
+}
+.loading-steps {
+  display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: #bbb;
+}
+.loading-steps .step { transition: color .2s; }
+.loading-steps .step.active { color: #2c3e50; font-weight: 600; }
+.loading-steps .step.done { color: #27ae60; }
 
 /* === Results View === */
-#results-view { display: none; height: 100vh; }
+#results-view { display: none; height: 100vh; position: relative; }
+
+.btn-research {
+  display: none; position: absolute; top: 16px; z-index: 1000;
+  left: calc(400px + (100% - 400px) / 2); transform: translateX(-50%);
+  padding: 10px 20px; background: #2c3e50; color: #fff; border: none;
+  border-radius: 24px; font-size: 14px; font-weight: 700; cursor: pointer;
+  box-shadow: 0 2px 12px rgba(0,0,0,.3); transition: background .2s;
+}
+.btn-research:hover { background: #1a252f; }
 
 #sidebar {
   width: 400px; min-width: 400px; height: 100vh; overflow-y: auto;
@@ -178,6 +199,7 @@ body { font-family: -apple-system, 'Malgun Gothic', sans-serif; height: 100vh; b
   #results-view.show-map #map { display: block; }
   #results-view.show-list #sidebar { display: block; }
   #results-view.show-list #map { display: none; }
+  .btn-research { left: 50%; }
 }
 </style>
 </head>
@@ -207,7 +229,12 @@ body { font-family: -apple-system, 'Malgun Gothic', sans-serif; height: 100vh; b
 <div id="loading-view">
   <div class="spinner"></div>
   <div class="loading-text" id="loading-text">검색 중...</div>
-  <div class="loading-sub" id="loading-sub"></div>
+  <div class="progress-bar-wrap"><div class="progress-bar-fill" id="progress-bar"></div></div>
+  <div class="loading-steps">
+    <div class="step" id="step-places">음식점 검색</div>
+    <div class="step" id="step-menus">메뉴 수집</div>
+    <div class="step" id="step-sort">결과 정렬</div>
+  </div>
 </div>
 
 <!-- Results -->
@@ -237,6 +264,7 @@ body { font-family: -apple-system, 'Malgun Gothic', sans-serif; height: 100vh; b
     <div id="place-list"></div>
   </div>
   <div id="map"></div>
+  <button id="btn-research" class="btn-research">이 지역에서 재검색</button>
 </div>
 
 <script>
@@ -244,8 +272,29 @@ const $ = (sel) => document.getElementById(sel);
 
 const views = { search: $('search-view'), loading: $('loading-view'), results: $('results-view') };
 function showView(name) {
-  Object.entries(views).forEach(([k, el]) => { el.style.display = k === name ? (name === 'results' ? 'flex' : 'flex') : 'none'; });
+  Object.entries(views).forEach(([k, el]) => { el.style.display = k === name ? 'flex' : 'none'; });
   if (name === 'results' && !mapInstance) initMap();
+}
+
+function setProgress(pct) {
+  $('progress-bar').style.width = Math.min(100, Math.max(0, pct)) + '%';
+}
+function setStep(phase) {
+  const steps = { places: 'step-places', menus: 'step-menus', sorting: 'step-sort' };
+  const order = ['places', 'menus', 'sorting'];
+  const idx = order.indexOf(phase);
+  order.forEach((p, i) => {
+    const el = $(steps[p]);
+    el.classList.toggle('done', i < idx);
+    el.classList.toggle('active', i === idx);
+  });
+}
+function resetProgress() {
+  setProgress(0);
+  ['step-places', 'step-menus', 'step-sort'].forEach(id => {
+    $(id).classList.remove('done', 'active');
+    $(id).textContent = id === 'step-places' ? '음식점 검색' : id === 'step-menus' ? '메뉴 수집' : '결과 정렬';
+  });
 }
 
 let mapInstance, markerLayer, stationLayer;
@@ -256,6 +305,7 @@ function initMap() {
   }).addTo(mapInstance);
   markerLayer = L.layerGroup().addTo(mapInstance);
   stationLayer = L.layerGroup().addTo(mapInstance);
+  setupMapResearch();
 }
 
 const priceStr = (p) => p > 0 ? p.toLocaleString('ko-KR') + '원' : '-';
@@ -277,35 +327,91 @@ document.querySelectorAll('.examples a').forEach(a => {
   });
 });
 
-form.addEventListener('submit', async (e) => {
+function doSearch(location, keyword, bounds) {
+  errorEl.style.display = 'none';
+  $('loading-text').textContent = bounds
+    ? `"${keyword}" 재검색 중...`
+    : `"${location}" 근처 "${keyword}" 검색 중...`;
+  resetProgress();
+  showView('loading');
+  $('btn-research').style.display = 'none';
+
+  const params = new URLSearchParams({ keyword });
+  if (bounds) {
+    params.set('swLat', bounds.swLat);
+    params.set('swLng', bounds.swLng);
+    params.set('neLat', bounds.neLat);
+    params.set('neLng', bounds.neLng);
+  } else {
+    params.set('location', location);
+  }
+  history.replaceState(null, '', '?' + params);
+
+  fetchWithSSE(params)
+    .then(data => {
+      if (data.places.length === 0) throw new Error('검색 결과가 없습니다. 다른 위치나 키워드를 시도해보세요.');
+      currentData = data;
+      showView('results');
+      renderResults(data);
+      setTimeout(() => mapInstance.invalidateSize(), 100);
+    })
+    .catch(err => {
+      errorEl.textContent = err.message;
+      errorEl.style.display = 'block';
+      showView('search');
+    });
+}
+
+function fetchWithSSE(params) {
+  return new Promise((resolve, reject) => {
+    const es = new EventSource('/api/search/stream?' + params);
+    let settled = false;
+
+    es.addEventListener('progress', (e) => {
+      const { phase, current, total } = JSON.parse(e.data);
+      setStep(phase);
+      if (phase === 'places') setProgress(10);
+      else if (phase === 'menus') {
+        const pct = total > 0 ? 10 + Math.round((current / total) * 75) : 40;
+        setProgress(pct);
+        $('step-menus').textContent = '메뉴 수집 (' + current + '/' + total + ')';
+      } else if (phase === 'sorting') setProgress(92);
+    });
+
+    es.addEventListener('done', (e) => {
+      if (settled) return;
+      settled = true;
+      setProgress(100);
+      setStep('sorting');
+      $('step-sort').classList.remove('active');
+      $('step-sort').classList.add('done');
+      es.close();
+      resolve(JSON.parse(e.data));
+    });
+
+    es.addEventListener('error', (e) => {
+      if (settled) return;
+      es.close();
+      if (e.data) {
+        settled = true;
+        reject(new Error(JSON.parse(e.data).message));
+        return;
+      }
+      settled = true;
+      fetch('/api/search?' + params)
+        .then(r => r.json())
+        .then(data => { if (data.error) reject(new Error(data.error)); else resolve(data); })
+        .catch(reject);
+    });
+  });
+}
+
+form.addEventListener('submit', (e) => {
   e.preventDefault();
   const location = locInput.value.trim();
   const keyword = kwInput.value.trim();
   if (!location || !keyword) return;
-
-  errorEl.style.display = 'none';
-  $('loading-text').textContent = `"${location}" 근처 "${keyword}" 검색 중...`;
-  $('loading-sub').textContent = '음식점을 찾고 메뉴를 수집하고 있습니다';
-  showView('loading');
-
-  const params = new URLSearchParams({ location, keyword });
-  history.replaceState(null, '', '?' + params);
-
-  try {
-    const res = await fetch('/api/search?' + params);
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || '검색에 실패했습니다.');
-    if (data.places.length === 0) throw new Error('검색 결과가 없습니다. 다른 위치나 키워드를 시도해보세요.');
-
-    currentData = data;
-    showView('results');
-    renderResults(data);
-    setTimeout(() => mapInstance.invalidateSize(), 100);
-  } catch (err) {
-    errorEl.textContent = err.message;
-    errorEl.style.display = 'block';
-    showView('search');
-  }
+  doSearch(location, keyword, null);
 });
 
 // --- Back ---
@@ -447,15 +553,57 @@ function renderResults(data) {
   };
 
   renderAll();
+
+  // Track bounds for re-search detection
+  setTimeout(() => {
+    if (!mapInstance) return;
+    lastSearchBounds = mapInstance.getBounds();
+  }, 300);
 }
+
+// --- Map re-search ---
+
+let lastSearchBounds = null;
+
+function setupMapResearch() {
+  if (!mapInstance) return;
+  mapInstance.on('moveend', () => {
+    if (!lastSearchBounds || !currentData) return;
+    const prev = lastSearchBounds.getCenter();
+    const curr = mapInstance.getCenter();
+    const span = lastSearchBounds.getNorth() - lastSearchBounds.getSouth();
+    const drift = Math.abs(prev.lat - curr.lat) + Math.abs(prev.lng - curr.lng);
+    $('btn-research').style.display = drift > span * 0.3 ? 'block' : 'none';
+  });
+}
+
+$('btn-research').addEventListener('click', () => {
+  if (!currentData) return;
+  const b = mapInstance.getBounds();
+  doSearch(null, currentData.keyword, {
+    swLat: b.getSouth(), swLng: b.getWest(),
+    neLat: b.getNorth(), neLng: b.getEast(),
+  });
+});
 
 // --- URL state: auto-search on load ---
 
 const params = new URLSearchParams(window.location.search);
-if (params.get('location') && params.get('keyword')) {
-  locInput.value = params.get('location');
-  kwInput.value = params.get('keyword');
-  form.dispatchEvent(new Event('submit'));
+if (params.get('keyword')) {
+  const loc = params.get('location');
+  const kw = params.get('keyword');
+  const sw = params.get('swLat');
+  if (loc) {
+    locInput.value = loc;
+    kwInput.value = kw;
+    doSearch(loc, kw, null);
+  } else if (sw) {
+    kwInput.value = kw;
+    doSearch(null, kw, {
+      swLat: +params.get('swLat'), swLng: +params.get('swLng'),
+      neLat: +params.get('neLat'), neLng: +params.get('neLng'),
+    });
+  }
 }
 </script>
 </body>

@@ -2,6 +2,15 @@ import "dotenv/config";
 import { writeFileSync } from "fs";
 import { fileURLToPath } from "url";
 import { resolve } from "path";
+import { resolveAlias, expandKeyword } from "./aliases.js";
+import {
+  logSearch,
+  getCachedMenus,
+  setCachedMenus,
+  getCachedSearch,
+  setCachedSearch,
+} from "./db.js";
+import { getFranchiseMenus } from "./franchises.js";
 
 const KAKAO_API_KEY = process.env.KAKAO_REST_API_KEY;
 const KAKAO_HEADERS = KAKAO_API_KEY ? { Authorization: `KakaoAK ${KAKAO_API_KEY}` } : {};
@@ -31,8 +40,8 @@ async function locationToCoords(location) {
   return null;
 }
 
-async function searchPlaces(location, keyword, { radius = 2000, maxPages = 3 } = {}) {
-  const coords = await locationToCoords(location);
+async function searchPlaces(location, keyword, { radius = 2000, maxPages = 3, coords: preCoords } = {}) {
+  const coords = preCoords || await locationToCoords(location);
   if (!coords) throw new Error(`"${location}" 위치를 찾을 수 없습니다.`);
 
   const allPlaces = [];
@@ -102,7 +111,7 @@ function extractMenus(panelData) {
   return result;
 }
 
-async function fetchPlaceMenus(placeId) {
+async function fetchPlaceMenusFresh(placeId) {
   try {
     const res = await fetch(
       `https://place-api.map.kakao.com/places/panel3/${placeId}`,
@@ -110,10 +119,26 @@ async function fetchPlaceMenus(placeId) {
     );
     if (!res.ok) return [];
     const data = await res.json();
-    return extractMenus(data);
+    const menus = extractMenus(data);
+    if (menus.length > 0) setCachedMenus(placeId, menus).catch(() => {});
+    return menus;
   } catch {
     return [];
   }
+}
+
+async function fetchPlaceMenus(placeId) {
+  const cached = await getCachedMenus(placeId).catch(() => null);
+  if (!cached) return fetchPlaceMenusFresh(placeId);
+
+  if (cached.status === "fresh") return cached.menus;
+
+  if (cached.status === "stale") {
+    fetchPlaceMenusFresh(placeId);
+    return cached.menus;
+  }
+
+  return fetchPlaceMenusFresh(placeId);
 }
 
 async function fetchAllMenus(places, { concurrency = 10, onProgress } = {}) {
@@ -121,15 +146,21 @@ async function fetchAllMenus(places, { concurrency = 10, onProgress } = {}) {
   for (let i = 0; i < places.length; i += concurrency) {
     const batch = places.slice(i, i + concurrency);
     const batchResults = await Promise.all(
-      batch.map(async (place) => ({
-        name: place.place_name,
-        address: place.road_address_name || place.address_name,
-        phone: place.phone,
-        url: place.place_url,
-        lat: parseFloat(place.y),
-        lng: parseFloat(place.x),
-        menus: await fetchPlaceMenus(place.id),
-      }))
+      batch.map(async (place) => {
+        let menus = await fetchPlaceMenus(place.id);
+        if (menus.length === 0) {
+          menus = getFranchiseMenus(place.place_name) || [];
+        }
+        return {
+          name: place.place_name,
+          address: place.road_address_name || place.address_name,
+          phone: place.phone,
+          url: place.place_url,
+          lat: parseFloat(place.y),
+          lng: parseFloat(place.x),
+          menus,
+        };
+      })
     );
     results.push(...batchResults);
     onProgress?.(Math.min(i + concurrency, places.length), places.length);
@@ -137,10 +168,14 @@ async function fetchAllMenus(places, { concurrency = 10, onProgress } = {}) {
   return results;
 }
 
-function computeOutlierBounds(results, keyword) {
+function computeOutlierBounds(results, keywords) {
+  const kws = Array.isArray(keywords) ? keywords : keywords ? [keywords] : [];
+  const matchMenu = kws.length > 0
+    ? (name) => kws.some((kw) => name.includes(kw))
+    : () => true;
   const prices = [];
   for (const r of results) {
-    const matched = keyword ? r.menus.filter((m) => m.name.includes(keyword)) : r.menus;
+    const matched = r.menus.filter((m) => matchMenu(m.name));
     for (const m of matched) {
       if (m.price > 0) prices.push(m.price);
     }
@@ -151,7 +186,126 @@ function computeOutlierBounds(results, keyword) {
   const q1 = prices[Math.floor(prices.length * 0.25)];
   const q3 = prices[Math.floor(prices.length * 0.75)];
   const iqr = q3 - q1;
-  return { lower: q1 - 1.5 * iqr, upper: q3 + 1.5 * iqr };
+  return { lower: Math.max(0, q1 - 1.5 * iqr), upper: q3 + 1.5 * iqr };
+}
+
+function computeBoundsRadius(bounds) {
+  const toRad = (d) => (d * Math.PI) / 180;
+  const lat1 = toRad(bounds.swLat), lat2 = toRad(bounds.neLat);
+  const dLat = lat2 - lat1;
+  const dLng = toRad(bounds.neLng - bounds.swLng);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+  const dist = 6371000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return Math.round(dist / 2);
+}
+
+async function handleSearch(rawLocation, keyword, { bounds, onProgress } = {}) {
+  const startTime = Date.now();
+  const resolvedLocation = resolveAlias(rawLocation);
+
+  if (!onProgress) {
+    const cached = await getCachedSearch(resolvedLocation, keyword, bounds).catch(() => null);
+    if (cached) {
+      logSearch({
+        raw_query: (rawLocation || "") + " " + keyword,
+        location: resolvedLocation || "",
+        keyword,
+        result_count: cached.places.length,
+        zero_result: cached.places.length === 0,
+        duration_ms: Date.now() - startTime,
+      }).catch(() => {});
+      return cached;
+    }
+  }
+
+  let searchCoords, searchRadius;
+  if (bounds) {
+    searchCoords = {
+      x: String((bounds.swLng + bounds.neLng) / 2),
+      y: String((bounds.swLat + bounds.neLat) / 2),
+    };
+    searchRadius = Math.min(computeBoundsRadius(bounds), 20000);
+  }
+
+  onProgress?.("places", 0, 0);
+
+  let places = await searchPlaces(resolvedLocation, keyword, {
+    coords: searchCoords,
+    radius: searchRadius || 2000,
+  });
+
+  if (places.length === 0 && !bounds) {
+    places = await searchPlaces(resolvedLocation, keyword, { radius: 5000 });
+  }
+
+  if (places.length === 0) {
+    const duration = Date.now() - startTime;
+    logSearch({
+      raw_query: (rawLocation || "") + " " + keyword,
+      location: resolvedLocation || "",
+      keyword,
+      result_count: 0,
+      zero_result: true,
+      duration_ms: duration,
+    }).catch(() => {});
+    return {
+      location: resolvedLocation || "",
+      keyword,
+      places: [],
+      stations: [],
+      iqr: { lower: 0, upper: Infinity },
+    };
+  }
+
+  const menuProgress = (done, total) => onProgress?.("menus", done, total);
+
+  const stationLocation = resolvedLocation || rawLocation;
+  const [results, stations] = await Promise.all([
+    fetchAllMenus(places, { onProgress: menuProgress }),
+    stationLocation ? searchSubwayStations(stationLocation) : Promise.resolve([]),
+  ]);
+
+  onProgress?.("sorting", 0, 0);
+
+  const keywords = expandKeyword(keyword);
+  const matchMenu = (name) => keywords.some((kw) => name.includes(kw));
+
+  const iqr = computeOutlierBounds(results, keywords);
+
+  const filtered = [];
+  for (const r of results) {
+    const matched = r.menus.filter((m) => matchMenu(m.name));
+    if (matched.length === 0) continue;
+    matched.sort((a, b) => {
+      if (!a.price && !b.price) return 0;
+      if (!a.price) return 1;
+      if (!b.price) return -1;
+      return a.price - b.price;
+    });
+    filtered.push({ ...r, matchedMenus: matched });
+  }
+
+  const duration = Date.now() - startTime;
+  logSearch({
+    raw_query: (rawLocation || "") + " " + keyword,
+    location: resolvedLocation || "",
+    keyword,
+    result_count: filtered.length,
+    zero_result: filtered.length === 0,
+    duration_ms: duration,
+  }).catch(() => {});
+
+  const result = {
+    location: resolvedLocation || "",
+    keyword,
+    places: filtered,
+    stations,
+    iqr,
+  };
+
+  setCachedSearch(resolvedLocation, keyword, bounds, result).catch(() => {});
+
+  return result;
 }
 
 export {
@@ -159,6 +313,7 @@ export {
   fetchAllMenus,
   searchSubwayStations,
   computeOutlierBounds,
+  handleSearch,
 };
 
 // --- CLI: CSV Output ---
@@ -494,7 +649,7 @@ async function main() {
   }
 }
 
-if (resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   main().catch((err) => {
     console.error("오류:", err.message);
     process.exit(1);
