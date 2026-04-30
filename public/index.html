@@ -155,13 +155,15 @@ body { font-family: -apple-system, 'Malgun Gothic', sans-serif; height: 100vh; b
 
 /* === Mobile Tab Switcher === */
 .mobile-tabs {
-  display: none; background: #2c3e50; border-top: 1px solid #1a252f;
+  display: none; background: #fff; border-bottom: 2px solid #e0e0e0;
 }
 .mobile-tabs button {
-  flex: 1; padding: 10px; border: none; background: transparent; color: rgba(255,255,255,.6);
-  font-size: 13px; font-weight: 700; cursor: pointer;
+  flex: 1; padding: 12px; border: none; background: transparent; color: #999;
+  font-size: 14px; font-weight: 700; cursor: pointer;
+  border-bottom: 3px solid transparent; margin-bottom: -2px;
+  transition: color .2s, border-color .2s;
 }
-.mobile-tabs button.active { color: #fff; background: rgba(255,255,255,.1); }
+.mobile-tabs button.active { color: #2c3e50; border-bottom-color: #e74c3c; }
 
 @media (max-width: 768px) {
   .search-card { padding: 32px 20px 28px; }
