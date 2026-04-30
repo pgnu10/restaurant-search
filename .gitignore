@@ -1,0 +1,6 @@
+node_modules/
+.env
+result.csv
+result.html
+*.png
+.claude/settings.local.json

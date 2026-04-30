@@ -1,0 +1,17 @@
+{
+  "name": "restaurant-search",
+  "version": "2.0.0",
+  "description": "카카오맵 기반 음식점 메뉴/가격 비교",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "search": "node search.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "dotenv": "^17.4.2",
+    "express": "^4.21.0"
+  }
+}

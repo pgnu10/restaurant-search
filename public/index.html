@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>음식점 메뉴 가격 비교</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, 'Malgun Gothic', sans-serif; height: 100vh; background: #f0f2f5; }
+
+/* === Search View === */
+#search-view {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  height: 100vh; padding: 20px;
+}
+.search-card {
+  background: #fff; border-radius: 16px; padding: 48px 40px 40px;
+  box-shadow: 0 4px 24px rgba(0,0,0,.08); max-width: 520px; width: 100%; text-align: center;
+}
+.search-card h1 { font-size: 28px; color: #2c3e50; margin-bottom: 8px; }
+.search-card .subtitle { font-size: 14px; color: #888; margin-bottom: 32px; line-height: 1.5; }
+.search-form { display: flex; gap: 8px; margin-bottom: 16px; }
+.search-form input {
+  flex: 1; padding: 12px 16px; border: 2px solid #e0e0e0; border-radius: 10px;
+  font-size: 15px; outline: none; transition: border-color .2s;
+}
+.search-form input:focus { border-color: #3498db; }
+.search-form button {
+  padding: 12px 28px; background: #2c3e50; color: #fff; border: none; border-radius: 10px;
+  font-size: 15px; font-weight: 700; cursor: pointer; transition: background .2s; white-space: nowrap;
+}
+.search-form button:hover { background: #1a252f; }
+.search-form button:disabled { background: #95a5a6; cursor: not-allowed; }
+.examples { font-size: 13px; color: #aaa; }
+.examples a {
+  color: #3498db; text-decoration: none; cursor: pointer;
+}
+.examples a:hover { text-decoration: underline; }
+.search-error {
+  margin-top: 12px; padding: 10px 16px; background: #fef2f2; color: #dc2626;
+  border-radius: 8px; font-size: 13px; display: none;
+}
+
+/* === Loading View === */
+#loading-view {
+  display: none; flex-direction: column; align-items: center; justify-content: center;
+  height: 100vh; gap: 20px;
+}
+.spinner {
+  width: 48px; height: 48px; border: 4px solid #e0e0e0; border-top-color: #2c3e50;
+  border-radius: 50%; animation: spin .8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.loading-text { font-size: 16px; color: #555; }
+.loading-sub { font-size: 13px; color: #999; }
+
+/* === Results View === */
+#results-view { display: none; height: 100vh; }
+
+#sidebar {
+  width: 400px; min-width: 400px; height: 100vh; overflow-y: auto;
+  border-right: 1px solid #ddd; background: #fafafa;
+}
+#sidebar-header {
+  position: sticky; top: 0; z-index: 10; background: #2c3e50; color: #fff;
+  padding: 16px 20px;
+}
+.header-top { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+.header-top h1 { font-size: 18px; flex: 1; }
+.btn-new-search {
+  padding: 5px 12px; border: 1px solid rgba(255,255,255,.4); border-radius: 6px;
+  background: transparent; color: #fff; font-size: 12px; cursor: pointer;
+  white-space: nowrap;
+}
+.btn-new-search:hover { background: rgba(255,255,255,.15); }
+#sidebar-header .summary { font-size: 13px; opacity: .8; margin-bottom: 10px; }
+#price-filter { background: #3a5268; border-radius: 8px; padding: 10px 12px; }
+#price-filter label { font-size: 12px; opacity: .8; display: block; margin-bottom: 6px; }
+.filter-row { display: flex; align-items: center; gap: 8px; }
+.filter-row input {
+  width: 90px; padding: 4px 8px; border: none; border-radius: 4px;
+  font-size: 13px; text-align: right; background: #fff; color: #333;
+}
+.filter-row span { font-size: 13px; opacity: .7; }
+.filter-row button {
+  margin-left: auto; padding: 4px 10px; border: 1px solid rgba(255,255,255,.4);
+  border-radius: 4px; background: transparent; color: #fff; font-size: 11px; cursor: pointer;
+}
+.filter-row button:hover { background: rgba(255,255,255,.15); }
+
+.place-card {
+  padding: 14px 20px; border-bottom: 1px solid #eee; cursor: pointer; transition: background .15s;
+}
+.place-card:hover, .place-card.active { background: #e8f4fd; }
+.place-name {
+  font-size: 15px; font-weight: 700; color: #2c3e50; margin-bottom: 2px;
+  display: flex; align-items: center; gap: 8px;
+}
+.place-rank {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; border-radius: 50%; font-size: 11px; font-weight: 800;
+  color: #fff; flex-shrink: 0;
+}
+.rank-1 { background: #e74c3c; } .rank-2 { background: #e67e22; }
+.rank-3 { background: #f1c40f; color: #333; } .rank-n { background: #95a5a6; }
+.place-addr { font-size: 12px; color: #888; margin-bottom: 6px; }
+.place-link { font-size: 12px; color: #3498db; text-decoration: none; }
+.place-link:hover { text-decoration: underline; }
+
+.menu-table { width: 100%; border-collapse: collapse; margin-top: 6px; }
+.menu-table td { padding: 3px 0; font-size: 13px; color: #444; vertical-align: top; }
+.menu-table td:last-child { text-align: right; font-weight: 600; white-space: nowrap; }
+.menu-table tr.cheapest td { color: #e74c3c; font-weight: 700; }
+.menu-table tr.outlier td { color: #bbb; text-decoration: line-through; }
+.outlier-tag {
+  display: inline-block; font-size: 10px; color: #999; background: #f0f0f0;
+  padding: 0 5px; border-radius: 3px; margin-left: 4px;
+  text-decoration: none; vertical-align: middle;
+}
+
+#map { flex: 1; height: 100vh; }
+
+.marker-dot {
+  width: 28px; height: 28px; border-radius: 50%; line-height: 28px; text-align: center;
+  font-size: 12px; font-weight: 800; color: #fff;
+  box-shadow: 0 2px 6px rgba(0,0,0,.35); cursor: pointer; transition: transform .15s;
+}
+.marker-dot:hover { transform: scale(1.3); }
+.dot-1 { background: #e74c3c; } .dot-2 { background: #e67e22; }
+.dot-3 { background: #f39c12; } .dot-n { background: #5a6c7d; }
+
+.station-label {
+  display: flex; align-items: center; gap: 4px;
+  background: #fff; color: #1a3a8a; padding: 3px 10px; border-radius: 14px;
+  font-size: 13px; font-weight: 800; white-space: nowrap;
+  border: 2px solid #3b5fc0; box-shadow: 0 1px 4px rgba(0,0,0,.25);
+}
+.station-icon {
+  display: inline-block; width: 16px; height: 16px; border-radius: 50%;
+  background: #3b5fc0; color: #fff; font-size: 10px; font-weight: 900;
+  line-height: 16px; text-align: center; flex-shrink: 0;
+}
+
+.leaflet-tooltip {
+  font-family: -apple-system, 'Malgun Gothic', sans-serif;
+  padding: 8px 12px; font-size: 13px; line-height: 1.5;
+  max-width: 280px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,.2);
+}
+
+.no-results {
+  padding: 40px 20px; text-align: center; color: #888; font-size: 14px; line-height: 1.6;
+}
+</style>
+</head>
+<body>
+
+<!-- Search -->
+<div id="search-view">
+  <div class="search-card">
+    <h1>음식점 메뉴 가격 비교</h1>
+    <p class="subtitle">위치와 메뉴를 입력하면 주변 음식점의 가격을 지도에서 비교합니다</p>
+    <form class="search-form" id="search-form">
+      <input type="text" id="input-location" placeholder="위치 (예: 사당역)" required />
+      <input type="text" id="input-keyword" placeholder="메뉴 (예: 보쌈)" required />
+      <button type="submit" id="btn-search">검색</button>
+    </form>
+    <div class="examples">
+      예시:
+      <a data-loc="사당역" data-kw="보쌈">사당역 보쌈</a> ·
+      <a data-loc="강남역" data-kw="피자">강남역 피자</a> ·
+      <a data-loc="홍대입구역" data-kw="떡볶이">홍대입구역 떡볶이</a>
+    </div>
+    <div class="search-error" id="search-error"></div>
+  </div>
+</div>
+
+<!-- Loading -->
+<div id="loading-view">
+  <div class="spinner"></div>
+  <div class="loading-text" id="loading-text">검색 중...</div>
+  <div class="loading-sub" id="loading-sub"></div>
+</div>
+
+<!-- Results -->
+<div id="results-view">
+  <div id="sidebar">
+    <div id="sidebar-header">
+      <div class="header-top">
+        <h1 id="results-title"></h1>
+        <button class="btn-new-search" id="btn-back">새 검색</button>
+      </div>
+      <div class="summary" id="summary"></div>
+      <div id="price-filter">
+        <label>가격 필터 (순위 계산 범위)</label>
+        <div class="filter-row">
+          <input type="number" id="minPrice" step="1000" />
+          <span>~</span>
+          <input type="number" id="maxPrice" step="1000" />
+          <span>원</span>
+          <button id="resetFilter">IQR 초기화</button>
+        </div>
+      </div>
+    </div>
+    <div id="place-list"></div>
+  </div>
+  <div id="map"></div>
+</div>
+
+<script>
+const $ = (sel) => document.getElementById(sel);
+
+const views = { search: $('search-view'), loading: $('loading-view'), results: $('results-view') };
+function showView(name) {
+  Object.entries(views).forEach(([k, el]) => { el.style.display = k === name ? (name === 'results' ? 'flex' : 'flex') : 'none'; });
+  if (name === 'results' && !mapInstance) initMap();
+}
+
+let mapInstance, markerLayer, stationLayer;
+function initMap() {
+  mapInstance = L.map('map');
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+    maxZoom: 19, attribution: '© OpenStreetMap contributors © CARTO'
+  }).addTo(mapInstance);
+  markerLayer = L.layerGroup().addTo(mapInstance);
+  stationLayer = L.layerGroup().addTo(mapInstance);
+}
+
+const priceStr = (p) => p > 0 ? p.toLocaleString('ko-KR') + '원' : '-';
+
+let currentData = null;
+
+// --- Search ---
+
+const form = $('search-form');
+const locInput = $('input-location');
+const kwInput = $('input-keyword');
+const errorEl = $('search-error');
+
+document.querySelectorAll('.examples a').forEach(a => {
+  a.addEventListener('click', () => {
+    locInput.value = a.dataset.loc;
+    kwInput.value = a.dataset.kw;
+    form.dispatchEvent(new Event('submit'));
+  });
+});
+
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const location = locInput.value.trim();
+  const keyword = kwInput.value.trim();
+  if (!location || !keyword) return;
+
+  errorEl.style.display = 'none';
+  $('loading-text').textContent = `"${location}" 근처 "${keyword}" 검색 중...`;
+  $('loading-sub').textContent = '음식점을 찾고 메뉴를 수집하고 있습니다';
+  showView('loading');
+
+  const params = new URLSearchParams({ location, keyword });
+  history.replaceState(null, '', '?' + params);
+
+  try {
+    const res = await fetch('/api/search?' + params);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '검색에 실패했습니다.');
+    if (data.places.length === 0) throw new Error('검색 결과가 없습니다. 다른 위치나 키워드를 시도해보세요.');
+
+    currentData = data;
+    showView('results');
+    renderResults(data);
+    setTimeout(() => mapInstance.invalidateSize(), 100);
+  } catch (err) {
+    errorEl.textContent = err.message;
+    errorEl.style.display = 'block';
+    showView('search');
+  }
+});
+
+// --- Back ---
+
+$('btn-back').addEventListener('click', () => {
+  history.replaceState(null, '', '/');
+  showView('search');
+  locInput.focus();
+});
+
+// --- Render Results ---
+
+function renderResults(data) {
+  const { location, keyword, places, stations, iqr } = data;
+
+  $('results-title').textContent = `${location} "${keyword}"`;
+
+  // Stations
+  stationLayer.clearLayers();
+  stations.forEach(s => {
+    const icon = L.divIcon({
+      className: '',
+      html: '<div class="station-label"><span class="station-icon">M</span>' + s.name + '</div>',
+      iconAnchor: [14, 14],
+    });
+    L.marker([s.lat, s.lng], { icon, interactive: false, zIndexOffset: -1000 }).addTo(stationLayer);
+  });
+
+  // IQR filter defaults
+  const minInput = $('minPrice');
+  const maxInput = $('maxPrice');
+  minInput.value = Math.floor(iqr.lower / 1000) * 1000;
+  maxInput.value = Math.ceil(iqr.upper / 1000) * 1000;
+
+  const renderAll = () => {
+    const lo = Number(minInput.value) || 0;
+    const hi = Number(maxInput.value) || Infinity;
+
+    const ranked = places.map(p => {
+      const menus = p.matchedMenus.map(m => ({
+        ...m, outlier: m.price > 0 && (m.price < lo || m.price > hi),
+      }));
+      const cheapest = menus.find(m => m.price > 0 && !m.outlier);
+      return { ...p, menus, cheapest, cheapestPrice: cheapest?.price ?? Infinity };
+    });
+    ranked.sort((a, b) => a.cheapestPrice - b.cheapestPrice);
+
+    const totalMenus = ranked.reduce((s, p) => s + p.menus.length, 0);
+    const excluded = ranked.reduce((s, p) => s + p.menus.filter(m => m.outlier).length, 0);
+    $('summary').innerHTML = ranked.length + '개 매장 / ' + totalMenus + '개 메뉴' +
+      (excluded ? '<br><span style="font-size:11px">' + excluded + '건 범위 밖 제외</span>' : '');
+
+    const listEl = $('place-list');
+    listEl.innerHTML = '';
+    markerLayer.clearLayers();
+
+    const bounds = L.latLngBounds();
+
+    ranked.forEach((p, idx) => {
+      const rank = idx + 1;
+      const rankClass = rank <= 3 ? 'rank-' + rank : 'rank-n';
+      const latlng = L.latLng(p.lat, p.lng);
+      bounds.extend(latlng);
+
+      const menuRows = p.menus.map(m => {
+        const isCheapest = p.cheapest && m.name === p.cheapest.name && m.price === p.cheapest.price;
+        const cls = m.outlier ? 'outlier' : isCheapest ? 'cheapest' : '';
+        return '<tr class="' + cls + '"><td>' + m.name +
+          (m.outlier ? ' <span class="outlier-tag">제외</span>' : '') +
+          '</td><td>' + priceStr(m.price) + '</td></tr>';
+      }).join('');
+
+      const card = document.createElement('div');
+      card.className = 'place-card';
+      card.innerHTML =
+        '<div class="place-name"><span class="place-rank ' + rankClass + '">' + rank + '</span>' + p.name + '</div>' +
+        '<div class="place-addr">' + (p.address || '') + (p.phone ? ' | ' + p.phone : '') + '</div>' +
+        '<table class="menu-table">' + menuRows + '</table>' +
+        (p.url ? '<a class="place-link" href="' + p.url + '" target="_blank">카카오맵에서 보기</a>' : '');
+      listEl.appendChild(card);
+
+      const dotClass = rank <= 3 ? 'dot-' + rank : 'dot-n';
+      const icon = L.divIcon({
+        className: '',
+        html: '<div class="marker-dot ' + dotClass + '">' + rank + '</div>',
+        iconSize: [28, 28], iconAnchor: [14, 14],
+      });
+
+      const validMenus = p.menus.filter(m => !m.outlier);
+      const tooltipHtml = '<b>' + p.name + '</b>' +
+        (p.cheapest ? ' <span style="color:#e74c3c">' + priceStr(p.cheapest.price) + '~</span>' : '') +
+        '<br><span style="color:#888;font-size:11px">' + (p.address || '') + '</span>' +
+        '<hr style="margin:4px 0;border:none;border-top:1px solid #eee">' +
+        validMenus.map(m => {
+          const style = p.cheapest && m.name === p.cheapest.name && m.price === p.cheapest.price
+            ? 'color:#e74c3c;font-weight:700' : '';
+          return '<span style="' + style + '">' + m.name + ' <b>' + priceStr(m.price) + '</b></span>';
+        }).join('<br>');
+
+      const marker = L.marker(latlng, { icon }).addTo(markerLayer);
+      marker.bindTooltip(tooltipHtml, { direction: 'top', offset: [0, -14] });
+
+      card.addEventListener('click', () => {
+        mapInstance.setView(latlng, 17);
+        marker.openTooltip();
+        document.querySelectorAll('.place-card').forEach(c => c.classList.remove('active'));
+        card.classList.add('active');
+      });
+      marker.on('click', () => {
+        document.querySelectorAll('.place-card').forEach(c => c.classList.remove('active'));
+        card.classList.add('active');
+        card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      });
+    });
+
+    if (bounds.isValid()) mapInstance.fitBounds(bounds, { padding: [40, 40] });
+  };
+
+  minInput.onchange = renderAll;
+  maxInput.onchange = renderAll;
+  $('resetFilter').onclick = () => {
+    minInput.value = Math.floor(iqr.lower / 1000) * 1000;
+    maxInput.value = Math.ceil(iqr.upper / 1000) * 1000;
+    renderAll();
+  };
+
+  renderAll();
+}
+
+// --- URL state: auto-search on load ---
+
+const params = new URLSearchParams(window.location.search);
+if (params.get('location') && params.get('keyword')) {
+  locInput.value = params.get('location');
+  kwInput.value = params.get('keyword');
+  form.dispatchEvent(new Event('submit'));
+}
+</script>
+</body>
+</html>
