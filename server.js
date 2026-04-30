@@ -7,7 +7,7 @@ import { handleSearch } from "./search.js";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
 
-app.use(express.static(join(__dirname, "public")));
+app.use(express.static(join(__dirname, "public"), { maxAge: "1h" }));
 
 function parseBounds(query) {
   const { swLat, swLng, neLat, neLng } = query;

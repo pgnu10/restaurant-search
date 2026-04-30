@@ -7,6 +7,7 @@ import {
   logSearch,
   getCachedMenus,
   setCachedMenus,
+  getCachedMenusBatch,
   getCachedSearch,
   setCachedSearch,
 } from "./db.js";
@@ -65,8 +66,8 @@ async function searchPlaces(location, keyword, { radius = 2000, maxPages = 3, co
   return allPlaces;
 }
 
-async function searchSubwayStations(location, radius = 3000) {
-  const coords = await locationToCoords(location);
+async function searchSubwayStations(location, { radius = 3000, coords: preCoords } = {}) {
+  const coords = preCoords || await locationToCoords(location);
   if (!coords) return [];
 
   const params = new URLSearchParams({
@@ -141,31 +142,55 @@ async function fetchPlaceMenus(placeId) {
   return fetchPlaceMenusFresh(placeId);
 }
 
-async function fetchAllMenus(places, { concurrency = 10, onProgress } = {}) {
+async function fetchAllMenus(places, { concurrency = 15, onProgress } = {}) {
+  const placeIds = places.map((p) => p.id);
+  const cachedMap = await getCachedMenusBatch(placeIds).catch(() => new Map());
+
   const results = [];
-  for (let i = 0; i < places.length; i += concurrency) {
-    const batch = places.slice(i, i + concurrency);
+  const freshNeeded = [];
+
+  for (const place of places) {
+    const cached = cachedMap.get(place.id);
+    const base = {
+      name: place.place_name,
+      address: place.road_address_name || place.address_name,
+      phone: place.phone,
+      url: place.place_url,
+      lat: parseFloat(place.y),
+      lng: parseFloat(place.x),
+    };
+
+    if (cached && cached.status === "fresh") {
+      const menus = cached.menus.length > 0 ? cached.menus : getFranchiseMenus(place.place_name) || [];
+      results.push({ ...base, menus, _idx: places.indexOf(place) });
+    } else if (cached && cached.status === "stale") {
+      const menus = cached.menus.length > 0 ? cached.menus : getFranchiseMenus(place.place_name) || [];
+      results.push({ ...base, menus, _idx: places.indexOf(place) });
+      fetchPlaceMenusFresh(place.id);
+    } else {
+      freshNeeded.push({ place, base });
+    }
+  }
+
+  onProgress?.(places.length - freshNeeded.length, places.length);
+
+  for (let i = 0; i < freshNeeded.length; i += concurrency) {
+    const batch = freshNeeded.slice(i, i + concurrency);
     const batchResults = await Promise.all(
-      batch.map(async (place) => {
-        let menus = await fetchPlaceMenus(place.id);
+      batch.map(async ({ place, base }) => {
+        let menus = await fetchPlaceMenusFresh(place.id);
         if (menus.length === 0) {
           menus = getFranchiseMenus(place.place_name) || [];
         }
-        return {
-          name: place.place_name,
-          address: place.road_address_name || place.address_name,
-          phone: place.phone,
-          url: place.place_url,
-          lat: parseFloat(place.y),
-          lng: parseFloat(place.x),
-          menus,
-        };
+        return { ...base, menus, _idx: places.indexOf(place) };
       })
     );
     results.push(...batchResults);
-    onProgress?.(Math.min(i + concurrency, places.length), places.length);
+    onProgress?.(Math.min(places.length - freshNeeded.length + i + concurrency, places.length), places.length);
   }
-  return results;
+
+  results.sort((a, b) => a._idx - b._idx);
+  return results.map(({ _idx, ...rest }) => rest);
 }
 
 function computeOutlierBounds(results, keywords) {
@@ -203,19 +228,20 @@ async function handleSearch(rawLocation, keyword, { bounds, onProgress } = {}) {
   const startTime = Date.now();
   const resolvedLocation = resolveAlias(rawLocation);
 
-  if (!onProgress) {
-    const cached = await getCachedSearch(resolvedLocation, keyword, bounds).catch(() => null);
-    if (cached) {
-      logSearch({
-        raw_query: (rawLocation || "") + " " + keyword,
-        location: resolvedLocation || "",
-        keyword,
-        result_count: cached.places.length,
-        zero_result: cached.places.length === 0,
-        duration_ms: Date.now() - startTime,
-      }).catch(() => {});
-      return cached;
-    }
+  const cached = await getCachedSearch(resolvedLocation, keyword, bounds).catch(() => null);
+  if (cached) {
+    onProgress?.("places", 0, 0);
+    onProgress?.("menus", cached.places.length, cached.places.length);
+    onProgress?.("sorting", 0, 0);
+    logSearch({
+      raw_query: (rawLocation || "") + " " + keyword,
+      location: resolvedLocation || "",
+      keyword,
+      result_count: cached.places.length,
+      zero_result: cached.places.length === 0,
+      duration_ms: Date.now() - startTime,
+    }).catch(() => {});
+    return cached;
   }
 
   let searchCoords, searchRadius;
@@ -225,6 +251,11 @@ async function handleSearch(rawLocation, keyword, { bounds, onProgress } = {}) {
       y: String((bounds.swLat + bounds.neLat) / 2),
     };
     searchRadius = Math.min(computeBoundsRadius(bounds), 20000);
+  }
+
+  if (!searchCoords && resolvedLocation) {
+    const coords = await locationToCoords(resolvedLocation);
+    if (coords) searchCoords = coords;
   }
 
   onProgress?.("places", 0, 0);
@@ -262,7 +293,7 @@ async function handleSearch(rawLocation, keyword, { bounds, onProgress } = {}) {
   const stationLocation = resolvedLocation || rawLocation;
   const [results, stations] = await Promise.all([
     fetchAllMenus(places, { onProgress: menuProgress }),
-    stationLocation ? searchSubwayStations(stationLocation) : Promise.resolve([]),
+    stationLocation ? searchSubwayStations(stationLocation, { coords: searchCoords }) : Promise.resolve([]),
   ]);
 
   onProgress?.("sorting", 0, 0);

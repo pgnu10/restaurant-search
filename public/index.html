@@ -217,7 +217,7 @@ body {
 #results-view { display: none; height: 100vh; position: relative; }
 
 .btn-research {
-  display: none; position: absolute; top: 16px; z-index: 1000;
+  display: none; position: absolute; bottom: 24px; z-index: 1000;
   left: calc(400px + (100% - 400px) / 2); transform: translateX(-50%);
   padding: 10px 24px; background: var(--surface); color: var(--text-primary);
   border: 1.5px solid var(--border); border-radius: var(--radius-xl);
@@ -252,15 +252,28 @@ body {
   flex: 1; letter-spacing: -0.01em;
 }
 
-.btn-new-search, .btn-share {
+.btn-new-search {
   padding: 5px 14px; border: 1px solid rgba(255,255,255,.25);
   border-radius: var(--radius-sm); background: transparent;
   color: rgba(255,255,255,.85); font-size: 12px; font-family: var(--font-body);
   cursor: pointer; white-space: nowrap; transition: all 0.2s ease;
 }
 
-.btn-new-search:hover, .btn-share:hover {
+.btn-new-search:hover {
   background: rgba(255,255,255,.12); border-color: rgba(255,255,255,.4); color: #fff;
+}
+
+.btn-share {
+  padding: 6px 16px; border: none;
+  border-radius: var(--radius-sm); background: var(--accent);
+  color: #fff; font-size: 12px; font-weight: 700; font-family: var(--font-body);
+  cursor: pointer; white-space: nowrap; transition: all 0.2s ease;
+  letter-spacing: 0.02em;
+}
+
+.btn-share:hover {
+  background: var(--accent-hover);
+  box-shadow: 0 2px 10px rgba(217, 59, 43, 0.35);
 }
 
 .share-toast {
@@ -440,7 +453,8 @@ body {
   #results-view.show-map #map { display: block; }
   #results-view.show-list #sidebar { display: block; }
   #results-view.show-list #map { display: none; }
-  .btn-research { left: 50%; }
+  .btn-research { left: 50%; bottom: 20px; }
+  #results-view.show-list .btn-research { display: none !important; }
 
   .place-card { padding: 14px 18px; }
 }

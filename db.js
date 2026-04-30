@@ -39,6 +39,32 @@ export async function getCachedMenus(placeId) {
   return { menus: data.menus, status: "fresh" };
 }
 
+function classifyAge(fetchedAt) {
+  const age = Date.now() - new Date(fetchedAt).getTime();
+  if (age > MENU_STALE_MS) return "expired";
+  if (age > MENU_FRESH_MS) return "stale";
+  return "fresh";
+}
+
+export async function getCachedMenusBatch(placeIds) {
+  const sb = getSupabase();
+  if (!sb || placeIds.length === 0) return new Map();
+
+  const { data, error } = await sb
+    .from("menus")
+    .select("place_id, menus, fetched_at")
+    .in("place_id", placeIds);
+
+  if (error || !data) return new Map();
+
+  const result = new Map();
+  for (const row of data) {
+    const status = classifyAge(row.fetched_at);
+    result.set(row.place_id, { menus: row.menus, status });
+  }
+  return result;
+}
+
 export async function setCachedMenus(placeId, menus) {
   const sb = getSupabase();
   if (!sb) return;
