@@ -3,4 +3,4 @@ node_modules/
 result.csv
 result.html
 *.png
-.claude/settings.local.json
+.claude/
