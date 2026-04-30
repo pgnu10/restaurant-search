@@ -271,7 +271,7 @@ body {
   background: rgba(255,255,255,.12); border-color: rgba(255,255,255,.4); color: #fff;
 }
 
-.btn-share {
+.btn-send {
   padding: 6px 16px; border: none;
   border-radius: var(--radius-sm); background: var(--accent);
   color: #fff; font-size: 12px; font-weight: 700; font-family: var(--font-body);
@@ -279,12 +279,12 @@ body {
   letter-spacing: 0.02em;
 }
 
-.btn-share:hover {
+.btn-send:hover {
   background: var(--accent-hover);
   box-shadow: 0 2px 10px rgba(217, 59, 43, 0.35);
 }
 
-.share-toast {
+.copy-toast {
   position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%);
   background: var(--text-primary); color: #fff; padding: 12px 28px;
   border-radius: var(--radius-xl); font-size: 14px; font-weight: 600;
@@ -293,7 +293,7 @@ body {
   pointer-events: none;
 }
 
-.share-toast.show { opacity: 1; }
+.copy-toast.show { opacity: 1; }
 
 #sidebar-header .summary { font-size: 13px; opacity: .7; margin-bottom: 12px; font-weight: 300; }
 
@@ -517,7 +517,7 @@ body {
       <div class="header-top">
         <h1 id="results-title"></h1>
         <div class="header-buttons">
-          <button class="btn-share" id="btn-share">공유</button>
+          <button class="btn-send" id="btn-send">공유</button>
           <button class="btn-new-search" id="btn-back">새 검색</button>
         </div>
       </div>
@@ -538,7 +538,7 @@ body {
   <div id="map"></div>
   <button id="btn-research" class="btn-research">이 지역에서 재검색</button>
 </div>
-<div class="share-toast" id="share-toast">링크가 복사되었습니다</div>
+<div class="copy-toast" id="copy-toast">링크가 복사되었습니다</div>
 
 <script>
 const $ = (sel) => document.getElementById(sel);
@@ -715,7 +715,7 @@ form.addEventListener('submit', (e) => {
 
 // --- Share ---
 
-$('btn-share').addEventListener('click', () => {
+$('btn-send').addEventListener('click', () => {
   const url = window.location.href;
   const title = currentData
     ? `${currentData.location} "${currentData.keyword}" 가격 비교`
@@ -725,7 +725,7 @@ $('btn-share').addEventListener('click', () => {
     navigator.share({ title, url }).catch(() => {});
   } else {
     navigator.clipboard.writeText(url).then(() => {
-      const toast = $('share-toast');
+      const toast = $('copy-toast');
       toast.classList.add('show');
       setTimeout(() => toast.classList.remove('show'), 2000);
     });
