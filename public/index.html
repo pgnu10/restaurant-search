@@ -245,11 +245,19 @@ body {
   background: var(--header-bg); color: #fff; padding: 18px 22px;
 }
 
-.header-top { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+.header-top {
+  display: flex; align-items: center; gap: 10px; margin-bottom: 6px;
+  flex-wrap: wrap;
+}
 
 .header-top h1 {
   font-family: var(--font-display); font-size: 18px; font-weight: 700;
   flex: 1; letter-spacing: -0.01em;
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+.header-buttons {
+  display: flex; gap: 8px; flex-shrink: 0;
 }
 
 .btn-new-search {
@@ -457,6 +465,10 @@ body {
   #results-view.show-list .btn-research { display: none !important; }
 
   .place-card { padding: 14px 18px; }
+
+  .header-top h1 { font-size: 15px; }
+  .header-buttons { flex-shrink: 0; }
+  #sidebar-header { padding: 14px 16px; }
 }
 </style>
 </head>
@@ -504,8 +516,10 @@ body {
     <div id="sidebar-header">
       <div class="header-top">
         <h1 id="results-title"></h1>
-        <button class="btn-share" id="btn-share">공유</button>
-        <button class="btn-new-search" id="btn-back">새 검색</button>
+        <div class="header-buttons">
+          <button class="btn-share" id="btn-share">공유</button>
+          <button class="btn-new-search" id="btn-back">새 검색</button>
+        </div>
       </div>
       <div class="summary" id="summary"></div>
       <div id="price-filter">
