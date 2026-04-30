@@ -21,14 +21,14 @@ body { font-family: -apple-system, 'Malgun Gothic', sans-serif; height: 100vh; b
 }
 .search-card h1 { font-size: 28px; color: #2c3e50; margin-bottom: 8px; }
 .search-card .subtitle { font-size: 14px; color: #888; margin-bottom: 32px; line-height: 1.5; }
-.search-form { display: flex; gap: 8px; margin-bottom: 16px; }
+.search-form { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
 .search-form input {
-  flex: 1; padding: 12px 16px; border: 2px solid #e0e0e0; border-radius: 10px;
-  font-size: 15px; outline: none; transition: border-color .2s;
+  flex: 1 1 140px; padding: 12px 16px; border: 2px solid #e0e0e0; border-radius: 10px;
+  font-size: 15px; outline: none; transition: border-color .2s; min-width: 0;
 }
 .search-form input:focus { border-color: #3498db; }
 .search-form button {
-  padding: 12px 28px; background: #2c3e50; color: #fff; border: none; border-radius: 10px;
+  flex: 1 1 100%; padding: 12px 28px; background: #2c3e50; color: #fff; border: none; border-radius: 10px;
   font-size: 15px; font-weight: 700; cursor: pointer; transition: background .2s; white-space: nowrap;
 }
 .search-form button:hover { background: #1a252f; }
@@ -152,6 +152,31 @@ body { font-family: -apple-system, 'Malgun Gothic', sans-serif; height: 100vh; b
 .no-results {
   padding: 40px 20px; text-align: center; color: #888; font-size: 14px; line-height: 1.6;
 }
+
+/* === Mobile Tab Switcher === */
+.mobile-tabs {
+  display: none; background: #2c3e50; border-top: 1px solid #1a252f;
+}
+.mobile-tabs button {
+  flex: 1; padding: 10px; border: none; background: transparent; color: rgba(255,255,255,.6);
+  font-size: 13px; font-weight: 700; cursor: pointer;
+}
+.mobile-tabs button.active { color: #fff; background: rgba(255,255,255,.1); }
+
+@media (max-width: 768px) {
+  .search-card { padding: 32px 20px 28px; }
+  .search-card h1 { font-size: 22px; }
+
+  #results-view { flex-direction: column; }
+  #sidebar { width: 100%; min-width: unset; height: calc(100vh - 44px); }
+  #map { width: 100%; height: calc(100vh - 44px); }
+  .mobile-tabs { display: flex; }
+
+  #results-view.show-map #sidebar { display: none; }
+  #results-view.show-map #map { display: block; }
+  #results-view.show-list #sidebar { display: block; }
+  #results-view.show-list #map { display: none; }
+}
 </style>
 </head>
 <body>
@@ -184,7 +209,11 @@ body { font-family: -apple-system, 'Malgun Gothic', sans-serif; height: 100vh; b
 </div>
 
 <!-- Results -->
-<div id="results-view">
+<div id="results-view" class="show-list">
+  <div class="mobile-tabs" id="mobile-tabs">
+    <button id="tab-list" class="active">목록</button>
+    <button id="tab-map">지도</button>
+  </div>
   <div id="sidebar">
     <div id="sidebar-header">
       <div class="header-top">
@@ -283,6 +312,20 @@ $('btn-back').addEventListener('click', () => {
   history.replaceState(null, '', '/');
   showView('search');
   locInput.focus();
+});
+
+// --- Mobile Tabs ---
+
+$('tab-list').addEventListener('click', () => {
+  $('results-view').className = 'show-list';
+  $('tab-list').classList.add('active');
+  $('tab-map').classList.remove('active');
+});
+$('tab-map').addEventListener('click', () => {
+  $('results-view').className = 'show-map';
+  $('tab-map').classList.add('active');
+  $('tab-list').classList.remove('active');
+  setTimeout(() => mapInstance.invalidateSize(), 100);
 });
 
 // --- Render Results ---
